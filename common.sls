@@ -7,6 +7,10 @@ git:
 vim:
   pkg.installed
 
+install-at:
+  pkg.installed:
+    - name: at
+
 python-dev:
   pkg.installed
 

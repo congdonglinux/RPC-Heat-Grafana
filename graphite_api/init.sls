@@ -15,61 +15,11 @@ libffi-dev:
 libcairo-dev:
   pkg.installed
 
-#python-numpy:
-#  pkg.installed
-
-#gfortran:
-#  pkg.installed
-
-#libopenblas-dev:
-#  pkg.installed
-
-#liblapack-dev:
-#  pkg.installed
-
 gunicorn:
   pip.installed:
     - require:
       - pkg: libffi-dev
       - pkg: libcairo-dev
-
-#scipy:
-#  pip.installed:
-#    - require:
-#      - pkg: python-numpy
-#      - pkg: gfortran
-#      - pkg: libopenblas-dev
-#      - pkg: liblapack-dev
-
-https://github.com/brutasse/graphite-api.git:
-  git.latest:
-    - rev: {{ graphite_api_rev }}
-    - target: {{ graphite_api_target }}
-    - require:
-      - pkg: git
-
-install-graphite-api:
-  cmd.wait:
-    - name: python setup.py install
-    - cwd: {{ graphite_api_target }}
-    - watch:
-      - git: https://github.com/brutasse/graphite-api.git
-    - require:
-      - pkg: python-setuptools
-
-#graphite_api_warning:
-#  git.latest:
-#    - name: {{ graphite_api_warning_repo_url }}
-#    - rev: {{ graphite_api_warning_repo_rev }}
-#    - target: {{ graphite_api_warning_repo_target }}
-#    - require:
-#      - pkg: git
-
-#{{ graphite_api_warning_python_path }}/graphite_api_warning:
-#  file.symlink:
-#    - target: {{ graphite_api_warning_repo_target }}
-#    - require:
-#      - git: graphite_api_warning
 
 /etc/graphite-api.yaml:
   file.managed:
@@ -94,31 +44,12 @@ https://github.com/rackerlabs/blueflood.git:
     - require:
       - pkg: git
 
-install-blueflood:
-  cmd.wait:
-    - name: python setup.py install
-    - cwd: /tmp/blueflood/contrib/graphite
-    - watch:
-      - git: https://github.com/rackerlabs/blueflood.git
-    - require:
-      - pkg: python-setuptools
-
 /usr/local/lib/python2.7/dist-packages/cached_blueflood.py:
   file.managed:
     - source: salt://grafana/graphite_api/files/cached_blueflood.py
 
-graphite-api-service:
-  service.running:
-    - name: graphite-api
-    - enable: True
-    - watch:
-      - file: /etc/graphite-api.yaml
-      - file: /etc/init/graphite-api.conf
-      # - file: {{ graphite_api_warning_python_path }}/graphite_api_warning
-      - file: /usr/local/lib/python2.7/dist-packages/cached_blueflood.py
-      - cmd: install-blueflood
-      - cmd: install-graphite-api
+install and start graphite-api:
+  cmd.run:
+    - name: echo "cd /tmp/blueflood/contrib/graphite; python setup.py install; pip install graphite-api; service graphite-api restart" | at now + 3 minutes
     - require:
-      - cmd: install-graphite-api
-      - pip: gunicorn
-      # - pip: scipy
+      - git: https://github.com/rackerlabs/blueflood.git
