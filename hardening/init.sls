@@ -1,5 +1,5 @@
 include:
-  - lamp.hardening.sysctl
-  - lamp.hardening.common
-  - lamp.hardening.software
-  - lamp.hardening.firewall
+  - grafana.hardening.sysctl
+  - grafana.hardening.common
+  - grafana.hardening.software
+  - grafana.hardening.firewall
