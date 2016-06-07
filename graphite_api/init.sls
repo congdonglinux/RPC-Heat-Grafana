@@ -121,4 +121,4 @@ graphite-api-service:
     - require:
       - cmd: install-graphite-api
       - pip: gunicorn
-      - pip: scipy
+      # - pip: scipy
