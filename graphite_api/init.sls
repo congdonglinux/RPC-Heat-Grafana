@@ -15,17 +15,17 @@ libffi-dev:
 libcairo-dev:
   pkg.installed
 
-python-numpy:
-  pkg.installed
+#python-numpy:
+#  pkg.installed
 
-gfortran:
-  pkg.installed
+#gfortran:
+#  pkg.installed
 
-libopenblas-dev:
-  pkg.installed
+#libopenblas-dev:
+#  pkg.installed
 
-liblapack-dev:
-  pkg.installed
+#liblapack-dev:
+#  pkg.installed
 
 gunicorn:
   pip.installed:
@@ -33,13 +33,13 @@ gunicorn:
       - pkg: libffi-dev
       - pkg: libcairo-dev
 
-scipy:
-  pip.installed:
-    - require:
-      - pkg: python-numpy
-      - pkg: gfortran
-      - pkg: libopenblas-dev
-      - pkg: liblapack-dev
+#scipy:
+#  pip.installed:
+#    - require:
+#      - pkg: python-numpy
+#      - pkg: gfortran
+#      - pkg: libopenblas-dev
+#      - pkg: liblapack-dev
 
 https://github.com/brutasse/graphite-api.git:
   git.latest:
