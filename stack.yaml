@@ -1,0 +1,407 @@
+heat_template_version: 2015-04-30
+
+description: |
+  Deploys a single server that runs nginx, grafana, and graphite api.
+  The datasource for graphite-api is configured to be rackspace maas.
+
+parameter_groups:
+  - label: Sizing and location
+    description: What networks and how large of a vm.
+    parameters:
+      - keyname
+      - image
+      - flavor
+      - apps-network
+      - floating-network
+
+  - label: Rackspace Monitoring
+    description: Credentials for connecting to Rackspace Monitoring
+    parameters:
+      - tenant
+      - username
+      - api_key
+
+  - label: Don't touch
+    description: These parameters should be left default except in special cases.
+    parameters:
+      - git-formula-repo
+
+parameters:
+
+  keyname:
+    type: string
+    label: SSH Keypair name.
+    description: Name of the ssh key used to ssh into the grafana server.
+
+  image:
+    type: string
+    label: Image Name
+    description: Name of the trusty image that contains software config heat elements.
+
+  flavor:
+    type: string
+    label: Flavor
+    description: Flavor (size) for all virtual machines in this stack.
+    default: m1.small
+
+  apps-network:
+    type: string
+    label: Apps Network Name or UUID
+    description: Name of the apps network where your applications live.
+    default: changeme
+
+  floating-network:
+    type: string
+    label: Floating Network Name or UUID
+    default: changeme
+
+  git-formula-repo:
+    type: string
+    label: Grafana Formula Repo
+    description: Formula git repository. This should remain as default except for development.
+    default: https://github.com/rcbops/RPC-Heat-Grafana.git
+
+  tenant:
+    type: string
+    label: Tenant
+    description: Tenant
+    default: rackspace_tenant
+
+  username:
+    type: string
+    label: Username
+    description: Username
+    default: rackspace_username
+
+  api_key:
+    type: string
+    label: Api Key
+    description: Api Key
+    default: rackspace_api_key
+
+resources:
+
+  web-secret:
+    type: OS::Heat::RandomString
+    properties:
+      length: 32
+      sequence: lettersdigits
+
+  # Security group
+  secgroup:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name:
+        str_replace:
+          template: grafana-$stack_name$
+          params:
+            $stack_name$:
+              get_param: OS::stack_name
+      rules:
+        - protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+        - protocol: tcp
+          port_range_min: 4505
+          port_range_max: 4506
+        # http
+        - protocol: tcp
+          port_range_min: 80
+          port_range_max: 80
+        # https
+        - protocol: tcp
+          port_range_min: 443
+          port_range_max: 443
+        # graphite-api
+        - protocol: tcp
+          port_range_min: 8888
+          port_range_max: 8888
+        # elasticsearch
+        - protocol: tcp
+          port_range_min: 9200
+          port_range_max: 9200
+        # memcached
+        - protocol: tcp
+          port_range_min: 11211
+          port_range_max: 11211
+          remote_ip_prefix: 127.0.0.1/0
+
+  grafana-ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network:
+        get_param: floating-network
+
+  # One port for the grafana server
+  grafana-port:
+    type: OS::Neutron::Port
+    properties:
+      name:
+        str_replace:
+          template: grafana-port-$stack_name$
+          params:
+            $stack_name$:
+              get_param: OS::stack_name
+      network:
+        get_param: apps-network
+      security_groups:
+        - get_resource: secgroup
+
+  grafana-floating-ip-ass:
+    type: OS::Neutron::FloatingIPAssociation
+    properties:
+      floatingip_id:
+        get_resource: grafana-ip
+      port_id:
+        get_resource: grafana-port
+
+  # Software configuration script for the salt-master
+  # Installs salt-master, sets permission on some personality files
+  # and uses git to clone any provided state/formula repos
+  config-grafana:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: script
+      inputs:
+        - name: web_username
+        - name: web_password
+        - name: tenant
+        - name: username
+        - name: api_key
+        - name: git_formula_repo
+      config: |
+        #!/bin/bash
+        set -ex
+        logdir=/var/log/heat-deployments
+        prefix=${logdir}/config-grafana
+        mkdir -p $logdir
+        exec &> >(tee -a ${prefix}.log)
+
+        [ -e ${prefix}.ran ] && exit 0
+        chmod -R 0600 ${logdir}
+        chmod 0600 /etc/salt/grains
+
+        # Install salt-master and git
+        echo "Install Salt Master"
+        add-apt-repository -y ppa:saltstack/salt2015-5
+        apt-get update
+        apt-get install -y --force-yes git salt-master salt-minion
+
+        mkdir -p /srv/salt
+        echo -e 'file_roots:\n  base:\n    - /srv/salt' >> /etc/salt/master
+
+        git clone "${git_formula_repo}" /srv/salt/grafana
+
+        # Finally - Restart salt service
+        service salt-master restart
+
+        # Install salt minion
+        echo master: localhost >> /etc/salt/minion
+        service salt-minion restart
+
+        MASTER_PKI_PATH="/etc/salt/pki/master/minions/"
+        MASTER_PKI_PATH_PRE="/etc/salt/pki/master/minions_pre/"
+        MINION_PKI_PATH="/etc/salt/pki/minion/minion.pub"
+        HOSTNAME="$(python  -c 'import socket; print socket.getfqdn()')"
+
+        while [ ! -s ${MINION_PKI_PATH} ]; do
+            echo "Waiting for ${MINION_PKI_PATH} to have non-zero content."
+            sleep 2
+        done
+
+        cp $MINION_PKI_PATH $MASTER_PKI_PATH$HOSTNAME;
+        chmod 700 $MASTER_PKI_PATH$HOSTNAME;
+        if [ -f $MASTER_PKI_PATH_PRE$HOSTNAME ];
+        then
+          rm $MASTER_PKI_PATH_PRE$HOSTNAME
+        fi
+        service salt-minion restart
+        sleep 10
+
+        salt-run state.orchestrate grafana.runner
+        touch ${prefix}.ran
+
+  # Software deployment for salt-master. Deploys the salt-master software
+  # configuration.
+  deploy-grafana:
+    type: OS::Heat::SoftwareDeployment
+    properties:
+      input_values:
+        web_username: grafana
+        web_password:
+          get_attr:
+            - web-secret
+            - value
+        tenant:
+          get_param: tenant
+        username:
+          get_param: username
+        api_key:
+          get_param: api_key
+        git_formula_repo:
+          get_param: git-formula-repo
+      config:
+        get_resource: config-grafana
+      server:
+        get_resource: grafana
+
+  # The salt master instance
+  # Should have one floating ip
+  grafana:
+    type: OS::Nova::Server
+    properties:
+      key_name:
+        get_param: keyname
+      image:
+        get_param: image
+      flavor:
+        get_param: flavor
+      name:
+        str_replace:
+          template: grafana-$stack_name$
+          params:
+            $stack_name$:
+              get_param: OS::stack_name
+
+      personality:
+
+        # The top.sls file for salt states.
+        # Dictates which minions get which formulas
+        /srv/salt/top.sls: |
+          base:
+            'roles:grafana':
+              - match: grain
+              - grafana
+
+        # The top.sls file for salt pillars.
+        # Dictates which minions get which pillars.
+        /srv/pillar/top.sls: |
+          base:
+            'roles:grafana':
+              - match: grain
+              - grafana
+
+        # The app pillar. Describe interfaces and salt-mine functions.
+        /srv/pillar/grafana.sls: |
+          es_version: 1.3.4
+          es_hash: 3d9e3a30481270179eab8fc093bc2569
+          gr_version: 1.8.1
+          gr_hash: 7019fc7c9e5a7bbbf992fbb4f22779c9
+          grafanizer_branch: master
+          graphite_api:
+            rev: a2104da9ffed42f3d0ee1dfcfe342152b4ad4e77
+            target: /tmp/graphite_api
+            gunicorn:
+              worker_timeout: 300
+          blueflood:
+            rev: master
+            target: /tmp/blueflood
+          nginx:
+            graphite:
+              proxy_read_timeout: 300
+          user-ports:
+            ssh:
+              chain: INPUT
+              proto: tcp
+              dport: 22
+            http:
+              chain: INPUT
+              proto: tcp
+              dport: 80
+            https:
+              chain: INPUT
+              proto: tcp
+              dport: 443
+            salt-master:
+              chain: INPUT
+              proto: tcp
+              dport: 4505
+            salt-minion:
+              chain: INPUT
+              proto: tcp
+              dport: 4506
+            graphite-api:
+              chain: INPUT
+              proto: tcp
+              dport: 8888
+            elasticsearch:
+              chain: INPUT
+              proto: tcp
+              dport: 9200
+            memcached:
+              chain: INPUT
+              proto: tcp
+              source: 127.0.0.1
+              dport: 11211
+
+        /etc/salt/grains:
+          str_replace:
+            params:
+              $web-secret$:
+                get_attr:
+                  - web-secret
+                  - value
+              $tenant$:
+                get_param: tenant
+              $username$:
+                get_param: username
+              $api_key$:
+                get_param: api_key
+            template: |
+              web_username: grafana
+              web_password: $web-secret$
+              rackspace:
+                tenant: $tenant$
+                username: $username$
+                api_key: $api_key$
+              roles:
+                - grafana
+
+      # Get access from the master-port
+      networks:
+        - port:
+            get_resource: grafana-port
+
+      # Using SoftwareConfigs - This needs to be set to SOFTWARE_CONFIG
+      user_data_format: SOFTWARE_CONFIG
+
+outputs:
+  grafana-ip:
+    description: The ip address of the grafana server.
+    value:
+      get_attr:
+        - grafana-ip
+        - floating_ip_address
+
+  grafana-username:
+    description: Grafana username for access to grafana.
+    value: grafana
+
+  grafana-password:
+    description: Grafana password for access to grafana.
+    value:
+      get_attr:
+        - web-secret
+        - value
+
+  grafana-url:
+    description: Url of grafana
+    value:
+      str_replace:
+        template: "https://$grafana-ip$"
+        params:
+          $grafana-ip$:
+            get_attr:
+              - grafana-ip
+              - floating_ip_address
+
+  ssh_access:
+    description: How to ssh into the grafana server.
+    value:
+      str_replace:
+        template: ssh ubuntu@$grafana-ip$
+        params:
+          $grafana-ip$:
+            get_attr:
+              - grafana-ip
+              - floating_ip_address

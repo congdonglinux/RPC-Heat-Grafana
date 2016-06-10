@@ -1,0 +1,7 @@
+datasource:
+  username: {{ salt['grains.get']('rackspace:username', 'RACKSPACE_USERNAME') }}
+  tenant: {{ salt['grains.get']('rackspace:tenant', 'RACKSPACE_TENANT') }}
+  api_key: {{ salt['grains.get']('rackspace:api_key', 'RACKSPACE_API_KEY') }}
+  url: https://monitoring.api.rackspacecloud.com/v1.0
+pool_size: 100
+template_dir: ~/grafanizer/sample_templates

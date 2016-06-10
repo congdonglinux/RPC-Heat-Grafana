@@ -1,0 +1,37 @@
+{%- set graphite_timeout = salt['pillar.get']('nginx:graphite:proxy_read_timeout', '300') -%}
+upstream graphite {
+    server 127.0.0.1:8888;
+}
+upstream elasticsearch {
+    server 127.0.0.1:9200;
+}
+server {
+    listen 80;
+    return 301 https://$host$request_uri;
+}
+server {
+    listen 443;
+    auth_basic 'Restricted';
+    auth_basic_user_file /etc/nginx/.htpasswd;
+
+    ssl on;
+    ssl_certificate /etc/nginx/ssl/grafana.crt;
+    ssl_certificate_key /etc/nginx/ssl/grafana.key;
+
+    location /graphite/ {
+        rewrite /graphite/(.*) /$1 break;
+        proxy_pass http://graphite;
+        proxy_redirect off;
+        proxy_set_header Host $host;
+        proxy_read_timeout {{ graphite_timeout }};
+    }
+    location /elasticsearch/ {
+        rewrite /elasticsearch/(.*) /$1 break;
+        proxy_pass http://elasticsearch;
+        proxy_redirect off;
+        proxy_set_header Host $host;
+    }
+    location / {
+        root /usr/share/nginx/grafana;
+    }
+}

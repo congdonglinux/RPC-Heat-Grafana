@@ -1,0 +1,19 @@
+######################################
+#### This file is managed by Salt ####
+######################################
+search_index: /dev/null
+finders:
+  - cached_blueflood.TenantBluefloodFinder
+functions:
+  - graphite_api.functions.SeriesFunctions
+  - graphite_api.functions.PieFunctions
+  # - graphite_api_warning.functions.CustomFunctions
+time_zone: UTC
+blueflood:
+  tenant: {{ salt['grains.get']('rackspace:tenant', 'RACKSPACE_TENANT') }}
+  username: {{ salt['grains.get']('rackspace:username', 'RACKSPACE_USERNAME') }}
+  apikey: {{ salt['grains.get']('rackspace:api_key', 'RACKSPACE_API_KEY') }}
+  authentication_module: rax_auth
+  authentication_class: BluefloodAuth
+  urls:
+    - http://iad.metrics.api.rackspacecloud.com

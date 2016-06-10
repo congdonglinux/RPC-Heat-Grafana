@@ -1,0 +1,11 @@
+minion-4gb:
+  - james-grafana-1:
+      grains:
+        web_username: grafana
+        web_password: somepassword
+        rackspace:
+          tenant: RACKSPACE_TENANT
+          username: RACKSPACE_USERNAME
+          api_key: RACKSPACE_API_KEY
+        roles:
+          - grafana
